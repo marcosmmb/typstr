@@ -1,0 +1,14 @@
+{
+  "name": "typstr",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A simple, configurable Typst editor with browser and Tauri desktop targets.",
+  "scripts": {
+    "web:serve": "python3 tools/dev_server.py 4173",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

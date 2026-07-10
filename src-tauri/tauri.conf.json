@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "typstr",
+  "version": "0.1.0",
+  "identifier": "dev.typstr.app",
+  "build": {
+    "beforeDevCommand": "python3 ../tools/dev_server.py 4173",
+    "beforeBuildCommand": "",
+    "frontendDist": "../web",
+    "devUrl": "http://127.0.0.1:4173"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "typstr",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 760,
+        "minHeight": 560
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}
