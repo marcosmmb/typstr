@@ -438,14 +438,23 @@ function scheduleRender() {
 
 async function renderNow() {
   const source = el.editor.value;
-  const nativeSvg = await compileWithTauri(source);
-  if (nativeSvg) {
-    el.preview.innerHTML = nativeSvg;
-    el.preview.style.fontSize = "";
-    state.lastDiagnostics = [];
+  const nativeResult = await compileWithTauri(source);
+  if (nativeResult.available) {
+    if (nativeResult.svg) {
+      el.preview.innerHTML = nativeResult.svg;
+      el.preview.dataset.renderer = "typst";
+      el.preview.style.fontSize = "";
+      state.lastDiagnostics = [];
+    } else {
+      el.preview.innerHTML = `<p class="diagnostic">${escapeHtml(nativeResult.error || "Typst failed to render the document")}</p>`;
+      el.preview.dataset.renderer = "typst-error";
+      state.lastDiagnostics = [{ line: 1, message: nativeResult.error || "Typst render failed" }];
+    }
   } else {
     const result = renderTypstSubset(source);
-    el.preview.innerHTML = result.html;
+    el.preview.innerHTML = `<p class="fallback-note">Browser preview is using the limited fallback renderer. Run typstr in Tauri for the real Typst renderer.</p>${result.html}`;
+    el.preview.dataset.renderer = "fallback";
+    el.preview.style.fontSize = "";
     applyPreviewStyles(result.styles);
     state.lastDiagnostics = result.diagnostics;
   }
@@ -454,14 +463,13 @@ async function renderNow() {
 
 async function compileWithTauri(source) {
   const invoke = window.__TAURI__?.core?.invoke;
-  if (!invoke) return null;
+  if (!invoke) return { available: false };
   try {
     const svg = await invoke("compile_typst", { source });
     setStatus("Rendered with native Typst");
-    return svg;
+    return { available: true, svg };
   } catch (error) {
-    state.lastDiagnostics = [{ line: 1, message: String(error) }];
-    return null;
+    return { available: true, error: String(error) };
   }
 }
 

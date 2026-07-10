@@ -411,6 +411,32 @@ button:focus-visible {
   color: var(--danger);
 }
 
+.paper .fallback-note {
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 13px;
+}
+
+.paper[data-renderer="typst"] {
+  width: auto;
+  max-width: 100%;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.paper[data-renderer="typst"] svg {
+  display: block;
+  width: min(100%, 860px);
+  height: auto;
+  margin: 0 auto 24px;
+  background: white;
+  box-shadow: var(--shadow);
+}
+
 .settings-panel {
   display: none;
   grid-template-rows: 38px auto auto auto auto minmax(0, 1fr) auto;

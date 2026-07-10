@@ -22,8 +22,8 @@ Then visit `http://127.0.0.1:4173`.
 - Configurable shortcuts and themes through JSON settings.
 - Browser file open/save/download.
 - Print/export preview.
-- Tauri desktop scaffold with a native `compile_typst` command that can use the
-  `typst` CLI when it is installed.
+- Tauri desktop scaffold with a native `compile_typst` command powered by the
+  official open-source Typst Rust crates.
 
 ## Keyboard Shortcuts
 
@@ -48,6 +48,6 @@ npm install
 npm run tauri:dev
 ```
 
-The desktop command currently shells out to `typst compile <input> <output.svg>`
-for a true Typst render. The browser app uses its built-in preview renderer until
-a full WASM Typst compiler is added.
+The desktop command embeds the official `typst`, `typst-svg`, and bundled
+`typst-assets` crates for true Typst rendering. The standalone browser app still
+uses a clearly labeled fallback until a Typst WASM package is installed.
