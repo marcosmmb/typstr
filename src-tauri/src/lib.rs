@@ -266,6 +266,7 @@ fn format_diagnostics(diagnostics: EcoVec<typst::diag::SourceDiagnostic>) -> Str
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .menu(|handle| tauri::menu::Menu::default(handle))
         .invoke_handler(tauri::generate_handler![compile_typst])
         .run(tauri::generate_context!())
         .expect("error while running typstr");
