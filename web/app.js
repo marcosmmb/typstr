@@ -50,6 +50,7 @@ const DEFAULT_CONFIG = {
     "mod+3": "makeHeading3",
     "mod+/": "toggleComment",
     "mod+,": "toggleSettings",
+    "alt+f": "toggleFileManager",
     "alt+e": "focusEditor",
     "alt+p": "focusPreview"
   },
@@ -113,11 +114,16 @@ const THEMES = {
 const STORAGE_KEYS = {
   config: "typstr.config",
   source: "typstr.source",
-  fileName: "typstr.fileName"
+  fileName: "typstr.fileName",
+  files: "typstr.files",
+  activeFileId: "typstr.activeFileId"
 };
 
 const state = {
   config: loadConfig(),
+  files: loadManagedFiles(),
+  activeFileId: localStorage.getItem(STORAGE_KEYS.activeFileId),
+  fileHandles: new Map(),
   fileHandle: null,
   fileName: localStorage.getItem(STORAGE_KEYS.fileName) || "untitled.typ",
   renderTimer: null,
@@ -138,6 +144,9 @@ const el = {
   paletteInput: document.getElementById("paletteInput"),
   paletteList: document.getElementById("paletteList"),
   fileInput: document.getElementById("fileInput"),
+  fileCollectionInput: document.getElementById("fileCollectionInput"),
+  fileList: document.getElementById("fileList"),
+  filesTabButton: document.getElementById("filesTabButton"),
   settingsPanel: document.getElementById("settingsPanel"),
   configEditor: document.getElementById("configEditor"),
   themeSelect: document.getElementById("themeSelect"),
@@ -149,10 +158,13 @@ const el = {
 const commands = [
   command("openPalette", "Command palette", "mod+k", openPalette),
   command("openFile", "Open file", "mod+o", openFile),
+  command("addFilesToManager", "Add files to file manager", "", addFilesToManager),
+  command("openFolder", "Open folder in file manager", "", openFolder),
   command("saveFile", "Save file", "mod+s", saveFile),
   command("downloadFile", "Download .typ file", "", downloadSource),
   command("printPreview", "Print or save PDF", "", printPreview),
   command("toggleSettings", "Toggle settings", "mod+,", toggleSettings),
+  command("toggleFileManager", "Toggle file manager", "alt+f", toggleFileManager),
   command("togglePreviewPosition", "Swap editor and preview", "", togglePreviewPosition),
   command("focusEditor", "Focus editor", "alt+e", () => el.editor.focus()),
   command("focusPreview", "Focus preview", "alt+p", () => el.previewScroller.focus()),
@@ -197,12 +209,98 @@ function saveConfig() {
   localStorage.setItem(STORAGE_KEYS.config, JSON.stringify(state.config, null, 2));
 }
 
+function loadManagedFiles() {
+  const raw = localStorage.getItem(STORAGE_KEYS.files);
+  if (!raw) return [];
+  try {
+    const files = JSON.parse(raw);
+    return Array.isArray(files) ? files.filter((file) => file.id && file.name) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveManagedFiles() {
+  const files = state.files.map(({ id, name, path, content }) => ({ id, name, path, content }));
+  localStorage.setItem(STORAGE_KEYS.files, JSON.stringify(files));
+}
+
+function ensureInitialFile() {
+  if (!state.files.length) {
+    const content = localStorage.getItem(STORAGE_KEYS.source) || DEFAULT_SOURCE;
+    const name = localStorage.getItem(STORAGE_KEYS.fileName) || "untitled.typ";
+    const file = createManagedFile(name, name, content);
+    state.files.push(file);
+    state.activeFileId = file.id;
+    saveManagedFiles();
+    localStorage.setItem(STORAGE_KEYS.activeFileId, file.id);
+  }
+
+  if (!state.files.some((file) => file.id === state.activeFileId)) {
+    state.activeFileId = state.files[0].id;
+    localStorage.setItem(STORAGE_KEYS.activeFileId, state.activeFileId);
+  }
+}
+
+function createManagedFile(name, path, content) {
+  return {
+    id: `${path}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name,
+    path,
+    content
+  };
+}
+
+function getActiveFile() {
+  return state.files.find((file) => file.id === state.activeFileId) || state.files[0];
+}
+
+function updateActiveFileContent(content) {
+  const activeFile = getActiveFile();
+  if (!activeFile) return;
+  activeFile.content = content;
+  saveManagedFiles();
+}
+
+function setActiveFile(fileId) {
+  const file = state.files.find((item) => item.id === fileId);
+  if (!file) return;
+  state.activeFileId = file.id;
+  state.fileName = file.name;
+  state.fileHandle = state.fileHandles.get(file.id) || null;
+  localStorage.setItem(STORAGE_KEYS.activeFileId, file.id);
+  localStorage.setItem(STORAGE_KEYS.fileName, file.name);
+  localStorage.setItem(STORAGE_KEYS.source, file.content);
+  el.editor.value = file.content;
+  el.fileName.textContent = file.name;
+  renderFileList();
+  updateLineNumbers();
+  renderNow();
+  setStatus(`Opened ${file.name}`);
+}
+
+function renderFileList() {
+  el.fileList.innerHTML = "";
+  for (const file of state.files) {
+    const button = document.createElement("button");
+    button.className = `file-item${file.id === state.activeFileId ? " active" : ""}`;
+    button.type = "button";
+    button.innerHTML = `<span>${escapeHtml(file.name)}</span><small>${escapeHtml(file.path || file.name)}</small>`;
+    button.addEventListener("click", () => setActiveFile(file.id));
+    el.fileList.append(button);
+  }
+}
+
 function init() {
-  el.editor.value = localStorage.getItem(STORAGE_KEYS.source) || DEFAULT_SOURCE;
+  ensureInitialFile();
+  const activeFile = getActiveFile();
+  el.editor.value = activeFile.content;
+  state.fileName = activeFile.name;
   el.fileName.textContent = state.fileName;
   bindUi();
   applyConfig();
   updateSettingsForm();
+  renderFileList();
   updateLineNumbers();
   renderNow();
   setStatus("Ready");
@@ -211,6 +309,7 @@ function init() {
 function bindUi() {
   el.editor.addEventListener("input", () => {
     localStorage.setItem(STORAGE_KEYS.source, el.editor.value);
+    updateActiveFileContent(el.editor.value);
     updateLineNumbers();
     scheduleRender();
   });
@@ -223,6 +322,9 @@ function bindUi() {
 
   document.getElementById("openButton").addEventListener("click", openFile);
   document.getElementById("saveButton").addEventListener("click", saveFile);
+  document.getElementById("addFilesButton").addEventListener("click", addFilesToManager);
+  document.getElementById("openFolderButton").addEventListener("click", openFolder);
+  el.filesTabButton.addEventListener("click", toggleFileManager);
   document.getElementById("paletteButton").addEventListener("click", openPalette);
   document.getElementById("settingsButton").addEventListener("click", toggleSettings);
   document.getElementById("closeSettingsButton").addEventListener("click", closeSettings);
@@ -234,6 +336,7 @@ function bindUi() {
   document.getElementById("printButton").addEventListener("click", printPreview);
 
   el.fileInput.addEventListener("change", handlePickedFile);
+  el.fileCollectionInput.addEventListener("change", handlePickedFiles);
   el.paletteInput.addEventListener("input", renderPalette);
   el.palette.addEventListener("close", () => el.editor.focus());
 
@@ -622,8 +725,7 @@ async function openFile() {
         types: [{ description: "Typst", accept: { "text/plain": [".typ", ".txt"] } }]
       });
       const file = await handle.getFile();
-      state.fileHandle = handle;
-      await loadFile(file);
+      await loadFile(file, handle);
       return;
     } catch (error) {
       if (error.name !== "AbortError") setStatus(String(error));
@@ -639,22 +741,88 @@ async function handlePickedFile(event) {
   el.fileInput.value = "";
 }
 
-async function loadFile(file) {
-  el.editor.value = await file.text();
-  state.fileName = file.name || "untitled.typ";
-  el.fileName.textContent = state.fileName;
-  localStorage.setItem(STORAGE_KEYS.fileName, state.fileName);
-  localStorage.setItem(STORAGE_KEYS.source, el.editor.value);
-  updateLineNumbers();
-  renderNow();
+async function handlePickedFiles(event) {
+  const files = Array.from(event.target.files || []);
+  await addFiles(files);
+  el.fileCollectionInput.value = "";
+}
+
+async function loadFile(file, handle = null) {
+  const managedFile = await addFile(file, handle);
+  setActiveFile(managedFile.id);
+}
+
+function addFilesToManager() {
+  el.fileCollectionInput.click();
+}
+
+async function openFolder() {
+  if ("showDirectoryPicker" in window) {
+    try {
+      const directory = await window.showDirectoryPicker();
+      const files = [];
+      await collectDirectoryFiles(directory, files);
+      await addFiles(files);
+      setStatus(`Loaded ${files.length} file${files.length === 1 ? "" : "s"}`);
+      return;
+    } catch (error) {
+      if (error.name !== "AbortError") setStatus(String(error));
+    }
+  }
+  addFilesToManager();
+}
+
+async function collectDirectoryFiles(directory, files, prefix = "") {
+  for await (const [name, handle] of directory.entries()) {
+    const path = prefix ? `${prefix}/${name}` : name;
+    if (handle.kind === "directory") {
+      await collectDirectoryFiles(handle, files, path);
+      continue;
+    }
+    if (!isTypstLikeFile(name)) continue;
+    const file = await handle.getFile();
+    files.push({ file, handle, path });
+  }
+}
+
+async function addFiles(files) {
+  let firstAdded = null;
+  for (const entry of files) {
+    const file = entry.file || entry;
+    if (!isTypstLikeFile(file.name)) continue;
+    const managedFile = await addFile(file, entry.handle || null, entry.path || file.webkitRelativePath || file.name);
+    firstAdded ||= managedFile;
+  }
+  if (firstAdded) setActiveFile(firstAdded.id);
+  renderFileList();
+}
+
+async function addFile(file, handle = null, path = file.name || "untitled.typ") {
+  const content = await file.text();
+  const name = file.name || path.split("/").pop() || "untitled.typ";
+  const existing = state.files.find((item) => item.path === path);
+  const managedFile = existing || createManagedFile(name, path, content);
+  managedFile.name = name;
+  managedFile.path = path;
+  managedFile.content = content;
+  if (!existing) state.files.push(managedFile);
+  if (handle) state.fileHandles.set(managedFile.id, handle);
+  saveManagedFiles();
+  return managedFile;
+}
+
+function isTypstLikeFile(name) {
+  return /\.(typ|txt)$/i.test(name);
 }
 
 async function saveFile() {
+  updateActiveFileContent(el.editor.value);
   if (state.fileHandle?.createWritable) {
     try {
       const writable = await state.fileHandle.createWritable();
       await writable.write(el.editor.value);
       await writable.close();
+      renderFileList();
       setStatus("Saved");
       return;
     } catch (error) {
@@ -662,6 +830,7 @@ async function saveFile() {
     }
   }
   localStorage.setItem(STORAGE_KEYS.source, el.editor.value);
+  renderFileList();
   setStatus("Saved locally");
 }
 
@@ -717,6 +886,13 @@ function closeSettings() {
   el.app.dataset.panel = "preview";
 }
 
+function toggleFileManager() {
+  const open = el.app.dataset.files !== "closed";
+  el.app.dataset.files = open ? "closed" : "open";
+  el.filesTabButton.classList.toggle("active", !open);
+  el.filesTabButton.setAttribute("aria-selected", String(!open));
+}
+
 function togglePreviewPosition() {
   state.config.preview.position = state.config.preview.position === "left" ? "right" : "left";
   saveConfig();
@@ -748,6 +924,8 @@ function resetConfig() {
 function resetDocument() {
   el.editor.value = DEFAULT_SOURCE;
   localStorage.setItem(STORAGE_KEYS.source, DEFAULT_SOURCE);
+  updateActiveFileContent(DEFAULT_SOURCE);
+  renderFileList();
   updateLineNumbers();
   renderNow();
 }

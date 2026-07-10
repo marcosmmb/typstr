@@ -126,8 +126,98 @@ button:focus-visible {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  grid-template-columns: 280px minmax(320px, 1fr) minmax(320px, 1fr);
   min-height: 0;
+}
+
+.side-panel {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  order: 0;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.side-tabs {
+  display: flex;
+  align-items: stretch;
+  border-right: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.side-tab {
+  width: 44px;
+  min-height: 100%;
+  border: 0;
+  border-radius: 0;
+  border-left: 3px solid transparent;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.side-tab.active {
+  border-left-color: var(--accent);
+  color: var(--text);
+  background: var(--surface);
+}
+
+.file-manager {
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.file-list {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  overflow: auto;
+  padding: 8px;
+}
+
+.file-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  align-items: start;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 8px;
+  text-align: left;
+  border-color: transparent;
+  background: transparent;
+}
+
+.file-item:hover,
+.file-item.active {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
+.file-item.active {
+  border-color: var(--accent);
+}
+
+.file-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 .pane {
@@ -138,16 +228,22 @@ button:focus-visible {
   border-right: 1px solid var(--border);
 }
 
+.editor-pane {
+  order: 1;
+}
+
 .preview-pane {
+  order: 2;
   border-right: 0;
 }
 
 .app[data-layout="preview-left"] .preview-pane {
-  order: -1;
+  order: 1;
   border-right: 1px solid var(--border);
 }
 
 .app[data-layout="preview-left"] .editor-pane {
+  order: 2;
   border-right: 0;
 }
 
@@ -306,6 +402,7 @@ button:focus-visible {
 .settings-panel {
   display: none;
   grid-template-rows: 38px auto auto auto auto minmax(0, 1fr) auto;
+  order: 3;
   min-width: 320px;
   min-height: 0;
   border-left: 1px solid var(--border);
@@ -313,7 +410,23 @@ button:focus-visible {
 }
 
 .app[data-panel="settings"] .workspace {
-  grid-template-columns: minmax(300px, 1fr) minmax(300px, 1fr) 360px;
+  grid-template-columns: 280px minmax(300px, 1fr) minmax(300px, 1fr) 360px;
+}
+
+.app[data-files="closed"] .workspace {
+  grid-template-columns: 44px minmax(320px, 1fr) minmax(320px, 1fr);
+}
+
+.app[data-panel="settings"][data-files="closed"] .workspace {
+  grid-template-columns: 44px minmax(300px, 1fr) minmax(300px, 1fr) 360px;
+}
+
+.app[data-files="closed"] .side-panel {
+  grid-template-columns: 44px;
+}
+
+.app[data-files="closed"] .file-manager {
+  display: none;
 }
 
 .app[data-panel="settings"] .settings-panel {
@@ -399,12 +512,28 @@ button:focus-visible {
 @media (max-width: 850px) {
   .workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(280px, 1fr) minmax(320px, 1fr);
+    grid-template-rows: 220px minmax(280px, 1fr) minmax(320px, 1fr);
   }
 
   .app[data-panel="settings"] .workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(220px, 1fr) minmax(260px, 1fr) minmax(360px, 0.8fr);
+    grid-template-rows: 220px minmax(220px, 1fr) minmax(260px, 1fr) minmax(360px, 0.8fr);
+  }
+
+  .app[data-files="closed"] .workspace,
+  .app[data-panel="settings"][data-files="closed"] .workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: 42px minmax(280px, 1fr) minmax(320px, 1fr);
+  }
+
+  .app[data-panel="settings"][data-files="closed"] .workspace {
+    grid-template-rows: 42px minmax(220px, 1fr) minmax(260px, 1fr) minmax(360px, 0.8fr);
+  }
+
+  .side-panel {
+    grid-template-columns: 42px minmax(0, 1fr);
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
   }
 
   .pane,
@@ -431,6 +560,7 @@ button:focus-visible {
   }
 
   .topbar,
+  .side-panel,
   .editor-pane,
   .settings-panel,
   .statusbar,

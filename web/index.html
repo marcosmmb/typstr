@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
-    <div class="app" data-panel="preview">
+    <div class="app" data-panel="preview" data-files="open">
       <header class="topbar">
         <div class="brand">
           <span class="brand-mark">t</span>
@@ -23,6 +23,22 @@
       </header>
 
       <main class="workspace">
+        <aside class="side-panel" id="sidePanel" data-active-tab="files" aria-label="Sidebar">
+          <div class="side-tabs" role="tablist" aria-label="Sidebar tabs">
+            <button id="filesTabButton" class="side-tab active" role="tab" aria-selected="true" title="Files">Files</button>
+          </div>
+          <section class="file-manager" id="fileManager" role="tabpanel" aria-label="Files">
+            <div class="pane-header">
+              <span>Files</span>
+              <div class="segmented" aria-label="File controls">
+                <button id="addFilesButton" title="Add files">Add</button>
+                <button id="openFolderButton" title="Open folder">Folder</button>
+              </div>
+            </div>
+            <div class="file-list" id="fileList" aria-label="Loaded files"></div>
+          </section>
+        </aside>
+
         <section class="pane editor-pane" aria-label="Typst editor">
           <div class="pane-header">
             <span>Editor</span>
@@ -111,6 +127,7 @@
     </dialog>
 
     <input id="fileInput" type="file" accept=".typ,text/plain" hidden>
+    <input id="fileCollectionInput" type="file" accept=".typ,text/plain" multiple hidden>
 
     <script src="./app.js"></script>
   </body>
