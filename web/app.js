@@ -36,7 +36,8 @@ const DEFAULT_CONFIG = {
   },
   preview: {
     debounceMs: 180,
-    zoom: 1
+    zoom: 1,
+    position: "right"
   },
   keymap: {
     "mod+k": "openPalette",
@@ -141,7 +142,8 @@ const el = {
   configEditor: document.getElementById("configEditor"),
   themeSelect: document.getElementById("themeSelect"),
   fontSizeInput: document.getElementById("fontSizeInput"),
-  debounceInput: document.getElementById("debounceInput")
+  debounceInput: document.getElementById("debounceInput"),
+  previewPositionSelect: document.getElementById("previewPositionSelect")
 };
 
 const commands = [
@@ -151,6 +153,7 @@ const commands = [
   command("downloadFile", "Download .typ file", "", downloadSource),
   command("printPreview", "Print or save PDF", "", printPreview),
   command("toggleSettings", "Toggle settings", "mod+,", toggleSettings),
+  command("togglePreviewPosition", "Swap editor and preview", "", togglePreviewPosition),
   command("focusEditor", "Focus editor", "alt+e", () => el.editor.focus()),
   command("focusPreview", "Focus preview", "alt+p", () => el.previewScroller.focus()),
   command("wrapBold", "Bold selection", "mod+b", () => wrapSelection("*", "*", "strong text")),
@@ -254,6 +257,13 @@ function bindUi() {
     updateSettingsForm();
   });
 
+  el.previewPositionSelect.addEventListener("change", () => {
+    state.config.preview.position = el.previewPositionSelect.value;
+    saveConfig();
+    applyConfig();
+    updateSettingsForm();
+  });
+
   document.getElementById("applyConfigButton").addEventListener("click", applyConfigFromEditor);
   document.getElementById("resetConfigButton").addEventListener("click", resetConfig);
 }
@@ -302,6 +312,7 @@ function applyConfig() {
   setCssVar("paper-bg", theme.paperBg);
   document.documentElement.style.setProperty("--editor-font-size", `${state.config.editor.fontSize}px`);
   document.documentElement.style.setProperty("--preview-scale", state.config.preview.zoom);
+  el.app.dataset.layout = state.config.preview.position === "left" ? "preview-left" : "preview-right";
 }
 
 function setCssVar(name, value) {
@@ -312,6 +323,7 @@ function updateSettingsForm() {
   el.themeSelect.value = state.config.theme;
   el.fontSizeInput.value = state.config.editor.fontSize;
   el.debounceInput.value = state.config.preview.debounceMs;
+  el.previewPositionSelect.value = state.config.preview.position;
   el.configEditor.value = JSON.stringify(state.config, null, 2);
 }
 
@@ -642,6 +654,14 @@ function toggleSettings() {
 
 function closeSettings() {
   el.app.dataset.panel = "preview";
+}
+
+function togglePreviewPosition() {
+  state.config.preview.position = state.config.preview.position === "left" ? "right" : "left";
+  saveConfig();
+  applyConfig();
+  updateSettingsForm();
+  setStatus("Editor and preview swapped");
 }
 
 function applyConfigFromEditor() {
