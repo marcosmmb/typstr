@@ -499,7 +499,8 @@ function renderTypstSubset(source) {
     }
   };
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     const rawTrimmed = line.trim();
 
     if (rawTrimmed.startsWith("```")) {
@@ -519,6 +520,25 @@ function renderTypstSubset(source) {
     if (inCode) {
       codeLines.push(line);
       continue;
+    }
+
+    const scriptBlock = readScriptBlock(lines, lineIndex);
+    if (scriptBlock) {
+      let rendered;
+      try {
+        rendered = applyScriptBlock(scriptBlock.text, context);
+      } catch (error) {
+        diagnostics.push({ line: lineIndex + 1, message: `Script error: ${error.message}` });
+        rendered = "";
+      }
+      if (rendered !== false) {
+        flushParagraph();
+        flushList();
+        flushTable();
+        if (rendered) blocks.push(rendered);
+        lineIndex = scriptBlock.endIndex;
+        continue;
+      }
     }
 
     const visibleLine = stripTypstComment(line);
@@ -597,10 +617,54 @@ function renderTypstSubset(source) {
 function createRenderContext() {
   return {
     variables: {},
+    functions: {},
     styles: {
       fontSize: null
     }
   };
+}
+
+function readScriptBlock(lines, startIndex) {
+  const firstLine = stripTypstComment(lines[startIndex]).trim();
+  if (!/^#(let|align)\b/.test(firstLine)) return null;
+
+  let depth = 0;
+  const blockLines = [];
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = stripTypstComment(lines[index]);
+    blockLines.push(line);
+    depth += syntaxDelta(line);
+    if (depth <= 0) return { text: blockLines.join("\n").trim(), endIndex: index };
+  }
+
+  return { text: blockLines.join("\n").trim(), endIndex: lines.length - 1 };
+}
+
+function syntaxDelta(line) {
+  let quote = null;
+  let delta = 0;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if ((char === '"' || char === "'") && line[index - 1] !== "\\") {
+      quote = quote === char ? null : quote || char;
+    }
+    if (quote) continue;
+    if (char === "(" || char === "[" || char === "{") delta += 1;
+    if (char === ")" || char === "]" || char === "}") delta -= 1;
+  }
+  return delta;
+}
+
+function applyScriptBlock(block, context) {
+  const functionDefinition = block.match(/^#let\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*=\s*\(([\s\S]*)\)\s*$/);
+  if (functionDefinition) {
+    context.functions[functionDefinition[1]] = createScriptFunction(functionDefinition[2], functionDefinition[3], context);
+    return "";
+  }
+
+  if (block.startsWith("#align(")) return renderAlignExpression(block, context);
+  if (applyScriptLine(block, context)) return "";
+  return false;
 }
 
 function applyScriptLine(line, context) {
@@ -615,19 +679,284 @@ function applyScriptLine(line, context) {
 
   const letValue = line.match(/^#let\s+([a-zA-Z_]\w*)\s*=\s*(.+)$/);
   if (letValue) {
-    context.variables[letValue[1]] = parseScriptValue(letValue[2]);
+    context.variables[letValue[1]] = parseScriptValue(letValue[2], context);
     return true;
   }
 
   return /^#(show|import|include)\b/.test(line);
 }
 
-function parseScriptValue(raw) {
+function parseScriptValue(raw, context) {
   const value = raw.trim();
   const quoted = value.match(/^["'](.*)["']$/);
   if (quoted) return quoted[1];
-  if (/^[0-9.]+$/.test(value)) return value;
-  return value;
+  if (/^[0-9.]+$/.test(value)) return Number(value);
+  if (value.startsWith("(") && value.endsWith(")") && splitTopLevel(value.slice(1, -1), ",").length > 1) {
+    return splitTopLevel(value.slice(1, -1), ",").map((item) => evaluateExpression(item, context));
+  }
+  try {
+    return evaluateExpression(value, context);
+  } catch {
+    return value;
+  }
+}
+
+function createScriptFunction(argsText, body, context) {
+  const args = argsText.split(",").map((arg) => arg.trim()).filter(Boolean);
+  const conditional = body.trim().match(/^if\s+(.+?)\s*\{\s*([\s\S]+?)\s*\}\s*else\s*\{\s*([\s\S]+?)\s*\}$/);
+  return (...values) => {
+    const scope = Object.fromEntries(args.map((arg, index) => [arg, values[index]]));
+    if (conditional) {
+      const branch = evaluateExpression(conditional[1], context, scope) ? conditional[2] : conditional[3];
+      return evaluateExpression(branch, context, scope);
+    }
+    return evaluateExpression(body, context, scope);
+  };
+}
+
+function renderAlignExpression(block, context) {
+  const align = block.match(/^#align\(\s*(left|center|right)\s*,\s*([\s\S]*)\)\s*$/);
+  if (!align) return false;
+  return `<div class="align align-${align[1]}">${renderContentExpression(align[2], context)}</div>`;
+}
+
+function renderContentExpression(expression, context) {
+  const trimmed = expression.trim();
+  if (trimmed.startsWith("table(") && trimmed.endsWith(")")) return renderTableExpression(trimmed, context);
+  return `<p>${renderTableCellExpression(trimmed, context)}</p>`;
+}
+
+function renderTableExpression(expression, context) {
+  const body = expression.slice("table(".length, -1);
+  const parts = splitTopLevel(body, ",").map((part) => part.trim()).filter(Boolean);
+  const columnsPart = parts.find((part) => part.startsWith("columns:"));
+  const columns = columnsPart ? Number(evaluateExpression(columnsPart.slice("columns:".length), context)) : 1;
+  const cells = [];
+
+  for (const part of parts) {
+    if (part.startsWith("columns:")) continue;
+    const spreadMap = part.match(/^\.\.([a-zA-Z_]\w*)\.map\(\s*([a-zA-Z_]\w*)\s*=>\s*([\s\S]+)\)$/);
+    if (spreadMap) {
+      const values = context.variables[spreadMap[1]] || [];
+      for (const value of values) {
+        cells.push(renderTableCellExpression(spreadMap[3], context, { [spreadMap[2]]: value }));
+      }
+      continue;
+    }
+    cells.push(renderTableCellExpression(part, context));
+  }
+
+  const safeColumns = Math.max(1, columns || cells.length || 1);
+  const rows = [];
+  for (let index = 0; index < cells.length; index += safeColumns) {
+    const row = cells.slice(index, index + safeColumns);
+    rows.push(`<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`);
+  }
+  return `<table>${rows.join("")}</table>`;
+}
+
+function renderTableCellExpression(expression, context, scope = {}) {
+  const trimmed = expression.trim();
+  if (trimmed.startsWith("$") && trimmed.endsWith("$")) {
+    return formatInline(substituteScriptVariables(trimmed, context, scope), context);
+  }
+  try {
+    const value = evaluateExpression(trimmed, context, scope);
+    return formatInline(String(value), context);
+  } catch {
+    return formatInline(substituteScriptVariables(trimmed, context, scope), context);
+  }
+}
+
+function substituteScriptVariables(value, context, scope = {}) {
+  return value.replace(/#([a-zA-Z_]\w*)\b/g, (match, name) => {
+    if (Object.hasOwn(scope, name)) return String(scope[name]);
+    if (Object.hasOwn(context.variables, name)) return String(context.variables[name]);
+    return match;
+  });
+}
+
+function splitTopLevel(value, delimiter) {
+  const parts = [];
+  let quote = null;
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if ((char === '"' || char === "'") && value[index - 1] !== "\\") {
+      quote = quote === char ? null : quote || char;
+    }
+    if (quote) continue;
+    if (char === "(" || char === "[" || char === "{") depth += 1;
+    if (char === ")" || char === "]" || char === "}") depth -= 1;
+    if (char === delimiter && depth === 0) {
+      parts.push(value.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parts.push(value.slice(start));
+  return parts;
+}
+
+function evaluateExpression(expression, context, scope = {}) {
+  const parser = createExpressionParser(expression, context, scope);
+  return parser.parse();
+}
+
+function createExpressionParser(expression, context, scope) {
+  const tokens = tokenizeExpression(expression);
+  let position = 0;
+
+  const peek = () => tokens[position];
+  const consume = (value = null) => {
+    const token = tokens[position];
+    if (!token || (value && token.value !== value)) throw new Error(`Expected ${value || "token"}`);
+    position += 1;
+    return token;
+  };
+
+  const parse = () => {
+    const value = parseComparison();
+    if (position < tokens.length) throw new Error("Unexpected token");
+    return value;
+  };
+
+  const parseComparison = () => {
+    let value = parseAdditive();
+    while (["<=", ">=", "<", ">", "==", "!="].includes(peek()?.value)) {
+      const operator = consume().value;
+      const right = parseAdditive();
+      if (operator === "<=") value = value <= right;
+      if (operator === ">=") value = value >= right;
+      if (operator === "<") value = value < right;
+      if (operator === ">") value = value > right;
+      if (operator === "==") value = value == right;
+      if (operator === "!=") value = value != right;
+    }
+    return value;
+  };
+
+  const parseAdditive = () => {
+    let value = parseMultiplicative();
+    while (peek()?.value === "+" || peek()?.value === "-") {
+      const operator = consume().value;
+      const right = parseMultiplicative();
+      value = operator === "+" ? value + right : value - right;
+    }
+    return value;
+  };
+
+  const parseMultiplicative = () => {
+    let value = parseUnary();
+    while (peek()?.value === "*" || peek()?.value === "/") {
+      const operator = consume().value;
+      const right = parseUnary();
+      value = operator === "*" ? value * right : value / right;
+    }
+    return value;
+  };
+
+  const parseUnary = () => {
+    if (peek()?.value === "-") {
+      consume("-");
+      return -parseUnary();
+    }
+    return parsePrimary();
+  };
+
+  const parsePrimary = () => {
+    const token = peek();
+    if (!token) throw new Error("Missing expression");
+    if (token.type === "number") {
+      consume();
+      return Number(token.value);
+    }
+    if (token.type === "string") {
+      consume();
+      return token.value;
+    }
+    if (token.value === "(") {
+      consume("(");
+      const value = parseComparison();
+      consume(")");
+      return value;
+    }
+    if (token.type === "identifier") {
+      const name = consume().value;
+      if (peek()?.value === "(") {
+        consume("(");
+        const args = [];
+        if (peek()?.value !== ")") {
+          do {
+            args.push(parseComparison());
+            if (peek()?.value !== ",") break;
+            consume(",");
+          } while (true);
+        }
+        consume(")");
+        return callScriptFunction(name, args, context);
+      }
+      if (Object.hasOwn(scope, name)) return scope[name];
+      if (Object.hasOwn(context.variables, name)) return context.variables[name];
+      throw new Error(`Unknown variable ${name}`);
+    }
+    throw new Error("Unsupported expression");
+  };
+
+  return { parse };
+}
+
+function callScriptFunction(name, args, context) {
+  if (name === "str") return String(args[0]);
+  if (name === "range") {
+    const start = Number(args[0] || 0);
+    const end = Number(args[1] || 0);
+    return Array.from({ length: Math.max(0, end - start) }, (_, index) => start + index);
+  }
+  if (context.functions[name]) return context.functions[name](...args);
+  throw new Error(`Unknown function ${name}`);
+}
+
+function tokenizeExpression(expression) {
+  const tokens = [];
+  for (let index = 0; index < expression.length;) {
+    const char = expression[index];
+    if (/\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+    const two = expression.slice(index, index + 2);
+    if (["<=", ">=", "==", "!="].includes(two)) {
+      tokens.push({ type: "operator", value: two });
+      index += 2;
+      continue;
+    }
+    if ("+-*/(),<>".includes(char)) {
+      tokens.push({ type: "operator", value: char });
+      index += 1;
+      continue;
+    }
+    const number = expression.slice(index).match(/^[0-9.]+/);
+    if (number) {
+      tokens.push({ type: "number", value: number[0] });
+      index += number[0].length;
+      continue;
+    }
+    const string = expression.slice(index).match(/^["']([^"']*)["']/);
+    if (string) {
+      tokens.push({ type: "string", value: string[1] });
+      index += string[0].length;
+      continue;
+    }
+    const identifier = expression.slice(index).match(/^[a-zA-Z_]\w*/);
+    if (identifier) {
+      tokens.push({ type: "identifier", value: identifier[0] });
+      index += identifier[0].length;
+      continue;
+    }
+    throw new Error(`Unsupported token ${char}`);
+  }
+  return tokens;
 }
 
 function cssSize(value, unit) {

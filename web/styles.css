@@ -361,6 +361,18 @@ button:focus-visible {
   padding: 12px;
 }
 
+.paper table {
+  border-collapse: collapse;
+  margin: 1em auto;
+}
+
+.paper td,
+.paper th {
+  border: 1px solid #ded7ca;
+  padding: 8px 12px;
+  text-align: center;
+}
+
 .paper .math {
   font-family: "Times New Roman", Georgia, serif;
   background: #f7f3eb;
