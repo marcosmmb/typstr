@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
+use serde::Deserialize;
 use typst::diag::{FileError, FileResult};
 use typst::ecow::EcoVec;
 use typst::foundations::{Bytes, Datetime, Duration};
@@ -24,16 +26,39 @@ static FONT_BOOK: LazyLock<typst::utils::LazyHash<FontBook>> =
 
 struct PreviewWorld {
     main: FileId,
-    source: Source,
+    sources: HashMap<FileId, Source>,
+    bytes: HashMap<FileId, Bytes>,
+}
+
+#[derive(Clone, Deserialize)]
+struct PreviewFile {
+    path: String,
+    content: String,
 }
 
 impl PreviewWorld {
-    fn new(source: String) -> Result<Self, String> {
-        let path = VirtualPath::new("main.typ").map_err(|error| error.to_string())?;
-        let main = RootedPath::new(VirtualRoot::Project, path).intern();
+    fn new(
+        source: String,
+        active_path: Option<String>,
+        mut files: Vec<PreviewFile>,
+    ) -> Result<Self, String> {
+        let main_path = active_path.unwrap_or_else(|| "main.typ".to_owned());
+        upsert_preview_file(&mut files, main_path.clone(), source);
+
+        let main = file_id_for_path(&main_path)?;
+        let mut sources = HashMap::new();
+        let mut bytes = HashMap::new();
+
+        for file in files {
+            let id = file_id_for_path(&file.path)?;
+            bytes.insert(id, Bytes::from_string(file.content.clone()));
+            sources.insert(id, Source::new(id, file.content));
+        }
+
         Ok(Self {
             main,
-            source: Source::new(main, source),
+            sources,
+            bytes,
         })
     }
 }
@@ -52,23 +77,17 @@ impl World for PreviewWorld {
     }
 
     fn source(&self, id: FileId) -> FileResult<Source> {
-        if id == self.main {
-            Ok(self.source.clone())
-        } else {
-            Err(FileError::NotFound(PathBuf::from(
-                id.vpath().get_without_slash(),
-            )))
-        }
+        self.sources
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| FileError::NotFound(PathBuf::from(id.vpath().get_without_slash())))
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
-        if id == self.main {
-            Ok(Bytes::from_string(self.source.text().to_owned()))
-        } else {
-            Err(FileError::NotFound(PathBuf::from(
-                id.vpath().get_without_slash(),
-            )))
-        }
+        self.bytes
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| FileError::NotFound(PathBuf::from(id.vpath().get_without_slash())))
     }
 
     fn font(&self, index: usize) -> Option<Font> {
@@ -82,8 +101,12 @@ impl World for PreviewWorld {
 }
 
 #[tauri::command]
-fn compile_typst(source: String) -> Result<String, String> {
-    let world = PreviewWorld::new(source)?;
+fn compile_typst(
+    source: String,
+    active_path: Option<String>,
+    files: Vec<PreviewFile>,
+) -> Result<String, String> {
+    let world = PreviewWorld::new(source, active_path, files)?;
     let result = typst::compile::<typst_layout::PagedDocument>(&world);
     let document = result.output.map_err(format_diagnostics)?;
     Ok(typst_svg::svg_merged(
@@ -91,6 +114,33 @@ fn compile_typst(source: String) -> Result<String, String> {
         &SvgOptions::default(),
         Abs::pt(16.0),
     ))
+}
+
+fn file_id_for_path(path: &str) -> Result<FileId, String> {
+    let normalized = normalize_project_path(path);
+    let path = VirtualPath::new(&normalized).map_err(|error| error.to_string())?;
+    Ok(RootedPath::new(VirtualRoot::Project, path).intern())
+}
+
+fn normalize_project_path(path: &str) -> String {
+    path.replace('\\', "/").trim_start_matches('/').to_owned()
+}
+
+fn upsert_preview_file(files: &mut Vec<PreviewFile>, path: String, content: String) {
+    let normalized_path = normalize_project_path(&path);
+    if let Some(file) = files
+        .iter_mut()
+        .find(|file| normalize_project_path(&file.path) == normalized_path)
+    {
+        file.path = normalized_path;
+        file.content = content;
+        return;
+    }
+
+    files.push(PreviewFile {
+        path: normalized_path,
+        content,
+    });
 }
 
 fn format_diagnostics(diagnostics: EcoVec<typst::diag::SourceDiagnostic>) -> String {
@@ -111,7 +161,15 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::compile_typst;
+    use super::{compile_typst, PreviewFile};
+
+    fn compile_test(
+        source: &str,
+        active_path: &str,
+        files: Vec<PreviewFile>,
+    ) -> Result<String, String> {
+        compile_typst(source.to_owned(), Some(active_path.to_owned()), files)
+    }
 
     #[test]
     fn renders_typst_scripting_with_official_compiler() {
@@ -130,8 +188,24 @@ mod tests {
 ))
 "#;
 
-        let svg = compile_typst(source.to_owned()).expect("Typst should render SVG");
+        let svg = compile_test(source, "main.typ", Vec::new()).expect("Typst should render SVG");
         assert!(svg.contains("<svg"));
         assert!(svg.contains("21"));
+    }
+
+    #[test]
+    fn resolves_included_files_from_project_map() {
+        let svg = compile_test(
+            r#"#include "chapters/intro.typ""#,
+            "main.typ",
+            vec![PreviewFile {
+                path: "chapters/intro.typ".to_owned(),
+                content: "Included chapter 42".to_owned(),
+            }],
+        )
+        .expect("Typst should render included file");
+
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("42"));
     }
 }

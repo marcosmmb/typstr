@@ -465,12 +465,34 @@ async function compileWithTauri(source) {
   const invoke = window.__TAURI__?.core?.invoke;
   if (!invoke) return { available: false };
   try {
-    const svg = await invoke("compile_typst", { source });
+    const activeFile = getActiveFile();
+    const activePath = activeFile?.path || state.fileName || "main.typ";
+    const files = buildProjectFiles(source, activePath);
+    const svg = await invoke("compile_typst", { source, activePath, files });
     setStatus("Rendered with native Typst");
     return { available: true, svg };
   } catch (error) {
     return { available: true, error: String(error) };
   }
+}
+
+function buildProjectFiles(source, activePath) {
+  const files = state.files.map(({ path, name, content }) => ({
+    path: normalizeProjectPath(path || name || "main.typ"),
+    content: content || ""
+  }));
+  const normalizedActivePath = normalizeProjectPath(activePath);
+  const activeFile = files.find((file) => file.path === normalizedActivePath);
+  if (activeFile) {
+    activeFile.content = source;
+  } else {
+    files.push({ path: normalizedActivePath, content: source });
+  }
+  return files;
+}
+
+function normalizeProjectPath(path) {
+  return String(path || "main.typ").replaceAll("\\", "/").replace(/^\/+/, "");
 }
 
 function renderTypstSubset(source) {
