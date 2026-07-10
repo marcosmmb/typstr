@@ -338,10 +338,12 @@ async function renderNow() {
   const nativeSvg = await compileWithTauri(source);
   if (nativeSvg) {
     el.preview.innerHTML = nativeSvg;
+    el.preview.style.fontSize = "";
     state.lastDiagnostics = [];
   } else {
     const result = renderTypstSubset(source);
     el.preview.innerHTML = result.html;
+    applyPreviewStyles(result.styles);
     state.lastDiagnostics = result.diagnostics;
   }
   updateStatus(source);
@@ -362,6 +364,7 @@ async function compileWithTauri(source) {
 
 function renderTypstSubset(source) {
   const diagnostics = getDiagnostics(source);
+  const context = createRenderContext();
   const blocks = [];
   const lines = source.split(/\r?\n/);
   let paragraph = [];
@@ -372,13 +375,13 @@ function renderTypstSubset(source) {
 
   const flushParagraph = () => {
     if (paragraph.length) {
-      blocks.push(`<p>${formatInline(paragraph.join(" "))}</p>`);
+      blocks.push(`<p>${formatInline(paragraph.join(" "), context)}</p>`);
       paragraph = [];
     }
   };
   const flushList = () => {
     if (list) {
-      blocks.push(`<${list.type}>${list.items.map((item) => `<li>${formatInline(item)}</li>`).join("")}</${list.type}>`);
+      blocks.push(`<${list.type}>${list.items.map((item) => `<li>${formatInline(item, context)}</li>`).join("")}</${list.type}>`);
       list = null;
     }
   };
@@ -386,7 +389,7 @@ function renderTypstSubset(source) {
     if (table.length) {
       const rows = table.map((row) => {
         const cells = row.split("|").map((cell) => cell.trim()).filter(Boolean);
-        return `<tr>${cells.map((cell) => `<td>${formatInline(cell)}</td>`).join("")}</tr>`;
+        return `<tr>${cells.map((cell) => `<td>${formatInline(cell, context)}</td>`).join("")}</tr>`;
       });
       blocks.push(`<table>${rows.join("")}</table>`);
       table = [];
@@ -422,19 +425,18 @@ function renderTypstSubset(source) {
       continue;
     }
 
+    if (applyScriptLine(trimmed, context)) {
+      flushParagraph();
+      flushList();
+      flushTable();
+      continue;
+    }
+
     if (trimmed.startsWith("//")) {
       flushParagraph();
       flushList();
       flushTable();
       blocks.push(`<p class="comment">${escapeHtml(trimmed)}</p>`);
-      continue;
-    }
-
-    if (/^#{1,2}(set|let|show|import|include)\b/.test(trimmed)) {
-      flushParagraph();
-      flushList();
-      flushTable();
-      blocks.push(`<p class="function">${escapeHtml(trimmed)}</p>`);
       continue;
     }
 
@@ -444,7 +446,7 @@ function renderTypstSubset(source) {
       flushList();
       flushTable();
       const level = Math.min(heading[1].length, 6);
-      blocks.push(`<h${level}>${formatInline(heading[2])}</h${level}>`);
+      blocks.push(`<h${level}>${formatInline(heading[2], context)}</h${level}>`);
       continue;
     }
 
@@ -491,11 +493,61 @@ function renderTypstSubset(source) {
     blocks.push(`<p class="diagnostic">${diagnostics.map((item) => `Line ${item.line}: ${escapeHtml(item.message)}`).join("<br>")}</p>`);
   }
 
-  return { html: blocks.join("\n"), diagnostics };
+  return { html: blocks.join("\n"), diagnostics, styles: context.styles };
 }
 
-function formatInline(text) {
+function createRenderContext() {
+  return {
+    variables: {},
+    styles: {
+      fontSize: null
+    }
+  };
+}
+
+function applyScriptLine(line, context) {
+  const setText = line.match(/^#set\s+text\s*\((.*)\)\s*$/);
+  if (setText) {
+    const size = setText[1].match(/\bsize\s*:\s*([0-9.]+)\s*(pt|px|em|rem)?/);
+    if (size) context.styles.fontSize = cssSize(size[1], size[2] || "pt");
+    return true;
+  }
+
+  if (/^#set\s+/.test(line)) return true;
+
+  const letValue = line.match(/^#let\s+([a-zA-Z_]\w*)\s*=\s*(.+)$/);
+  if (letValue) {
+    context.variables[letValue[1]] = parseScriptValue(letValue[2]);
+    return true;
+  }
+
+  return /^#(show|import|include)\b/.test(line);
+}
+
+function parseScriptValue(raw) {
+  const value = raw.trim();
+  const quoted = value.match(/^["'](.*)["']$/);
+  if (quoted) return quoted[1];
+  if (/^[0-9.]+$/.test(value)) return value;
+  return value;
+}
+
+function cssSize(value, unit) {
+  if (unit === "pt") return `${Number(value) * 1.3333333333}px`;
+  return `${value}${unit}`;
+}
+
+function applyPreviewStyles(styles) {
+  el.preview.style.fontSize = styles.fontSize || "";
+}
+
+function formatInline(text, context = createRenderContext()) {
   let value = escapeHtml(text);
+  value = value.replace(/#([a-zA-Z_]\w*)\b/g, (match, name) => {
+    if (!Object.hasOwn(context.variables, name)) return match;
+    return escapeHtml(String(context.variables[name]));
+  });
+  value = value.replace(/#align\((left|center|right)\)\[([^\]]+)\]/g, '<span class="align align-$1">$2</span>');
   value = value.replace(/`([^`]+)`/g, "<code>$1</code>");
   value = value.replace(/\$([^$]+)\$/g, '<span class="math">$1</span>');
   value = value.replace(/\*([^*]+)\*/g, "<strong>$1</strong>");

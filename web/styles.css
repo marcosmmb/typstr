@@ -281,6 +281,22 @@ button:focus-visible {
   font-family: var(--mono);
 }
 
+.paper .align {
+  display: block;
+}
+
+.paper .align-left {
+  text-align: left;
+}
+
+.paper .align-center {
+  text-align: center;
+}
+
+.paper .align-right {
+  text-align: right;
+}
+
 .paper .diagnostic {
   border-left: 3px solid var(--danger);
   padding-left: 10px;
