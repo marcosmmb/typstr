@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "dev.typstr.app",
   "build": {
-    "beforeDevCommand": "python3 ../tools/dev_server.py 4173",
+    "beforeDevCommand": "python3 tools/dev_server.py 7777",
     "beforeBuildCommand": "",
     "frontendDist": "../web",
-    "devUrl": "http://127.0.0.1:4173"
+    "devUrl": "http://127.0.0.1:7777"
   },
   "app": {
     "withGlobalTauri": true,

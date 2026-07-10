@@ -1039,6 +1039,13 @@ function getDiagnostics(source) {
   const diagnostics = [];
   const lines = source.split(/\r?\n/).map(stripTypstComment);
   lines.forEach((line, index) => {
+    if (/^\s*#import\s+"@[^"]+"/.test(line)) {
+      diagnostics.push({
+        line: index + 1,
+        message: "Package imports require the native Tauri renderer and a downloaded Typst package"
+      });
+    }
+
     const mathCount = (line.match(/\$/g) || []).length;
     if (mathCount % 2 === 1) diagnostics.push({ line: index + 1, message: "Unmatched math delimiter `$`" });
   });
