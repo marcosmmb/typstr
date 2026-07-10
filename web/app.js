@@ -397,9 +397,9 @@ function renderTypstSubset(source) {
   };
 
   for (const line of lines) {
-    const trimmed = line.trim();
+    const rawTrimmed = line.trim();
 
-    if (trimmed.startsWith("```")) {
+    if (rawTrimmed.startsWith("```")) {
       flushParagraph();
       flushList();
       flushTable();
@@ -418,6 +418,9 @@ function renderTypstSubset(source) {
       continue;
     }
 
+    const visibleLine = stripTypstComment(line);
+    const trimmed = visibleLine.trim();
+
     if (!trimmed) {
       flushParagraph();
       flushList();
@@ -429,14 +432,6 @@ function renderTypstSubset(source) {
       flushParagraph();
       flushList();
       flushTable();
-      continue;
-    }
-
-    if (trimmed.startsWith("//")) {
-      flushParagraph();
-      flushList();
-      flushTable();
-      blocks.push(`<p class="comment">${escapeHtml(trimmed)}</p>`);
       continue;
     }
 
@@ -541,6 +536,19 @@ function applyPreviewStyles(styles) {
   el.preview.style.fontSize = styles.fontSize || "";
 }
 
+function stripTypstComment(line) {
+  let quote = null;
+  for (let index = 0; index < line.length - 1; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if ((char === '"' || char === "'") && line[index - 1] !== "\\") {
+      quote = quote === char ? null : quote || char;
+    }
+    if (!quote && char === "/" && next === "/") return line.slice(0, index);
+  }
+  return line;
+}
+
 function formatInline(text, context = createRenderContext()) {
   let value = escapeHtml(text);
   value = value.replace(/#([a-zA-Z_]\w*)\b/g, (match, name) => {
@@ -567,12 +575,13 @@ function escapeHtml(value) {
 
 function getDiagnostics(source) {
   const diagnostics = [];
-  const lines = source.split(/\r?\n/);
+  const lines = source.split(/\r?\n/).map(stripTypstComment);
   lines.forEach((line, index) => {
     const mathCount = (line.match(/\$/g) || []).length;
     if (mathCount % 2 === 1) diagnostics.push({ line: index + 1, message: "Unmatched math delimiter `$`" });
   });
 
+  source = lines.join("\n");
   const pairs = [
     ["(", ")"],
     ["[", "]"],
